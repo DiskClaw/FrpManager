@@ -1,0 +1,36 @@
+name: Build FrpManager
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        platform: [x64]
+        configuration: [Release]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Restore NuGet packages
+      run: nuget restore FrpManager.sln
+      continue-on-error: true
+
+    - name: Build
+      run: msbuild FrpManager.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /v:minimal
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: FrpManager-${{ matrix.platform }}-${{ matrix.configuration }}
+        path: FrpManager.exe
+        if-no-files-found: warn
