@@ -737,7 +737,6 @@ void MainWindow::StartProcess(FrpMode mode) {
     if (IsExactExeRunning(exePath)) {
         const wchar_t* msg = mode == FrpMode::Client ? Ls(S_MSG_FRPC_ALREADY_RUNNING, zh) : Ls(S_MSG_FRPS_ALREADY_RUNNING, zh);
         SetWindowTextW(hwndStatusBar_, msg);
-        if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_NOTICE, zh), msg, 2000);
         UpdateProcessControls();
         return;
     }
@@ -780,7 +779,6 @@ void MainWindow::StopProcess(FrpMode mode) {
     }
 
     SetWindowTextW(hwndStatusBar_, msg.c_str());
-    if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_CLEANED, zh), msg.c_str(), 2000);
 
     UpdateProcessControls();
     RefreshSummary();
@@ -791,8 +789,6 @@ void MainWindow::HandleProcessExitUi(FrpMode mode, DWORD exitCode) {
     bool zh = (currentLang_ == LangZh);
     const wchar_t* exitPrefix = mode == FrpMode::Client ? Ls(S_MSG_FRPC_EXIT, zh) : Ls(S_MSG_FRPS_EXIT, zh);
     std::wstring msg = std::wstring(exitPrefix) + std::to_wstring(exitCode);
-    if (!exiting_ && exitCode != 0 && tray_)
-        tray_->ShowBalloon(Ls(S_BALLOON_EXIT_ERROR, zh), msg.c_str(), 2000);
 
     SetWindowTextW(hwndStatusBar_, msg.c_str());
     UpdateProcessControls();
@@ -1027,7 +1023,6 @@ LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
             }
             else {
                 SetWindowTextW(hwndStatusBar_, zh ? L"程序已缩小到托盘，右键托盘图标选择\"显示窗口\"" : L"Minimized to tray. Right-click tray icon to show window.");
-                if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_NOTICE, zh), zh ? L"程序已缩小到托盘" : L"Minimized to tray", 2000);
                 ShowWindow(hwnd_, SW_HIDE);
             }
             return 0;
