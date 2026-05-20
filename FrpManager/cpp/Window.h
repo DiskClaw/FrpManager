@@ -7,11 +7,11 @@
 #include "Settings.h"
 
 // 自定义消息定义
-enum {
-    WM_OUTPUT = WM_USER + 10,  // 进程输出消息
-    WM_TRAY_EXIT = WM_USER + 11,  // 托盘退出消息
-    WM_PROCESS_EXIT = WM_USER + 12   // 进程退出消息
-};
+static const int WM_OUTPUT = WM_USER + 2;
+static const int WM_PROCESS_EXIT = WM_USER + 3;
+static const int WM_TRAY_EXIT = WM_USER + 4;
+static const int WM_REFRESH_LANG = WM_USER + 5;
+static const int WM_TASKBARCREATED = WM_USER + 6;
 
 // 主窗口类，实现进程回调与托盘回调接口
 class MainWindow : public IFrpProcessCallback, public ITrayCallback {
@@ -25,8 +25,16 @@ public:
 
     // 停止所有进程并更新控件状态（供 Settings 调用）
     void StopAllProcesses();
+    HWND GetHwnd() const { return hwnd_; }
+
+    // 多语言
+    enum Lang { LangZh, LangEn };
+    Lang GetLang() const { return currentLang_; }
+    void ToggleLang();
+    void ApplyLang();  // 根据 currentLang_ 更新所有控件文字
 
 private:
+    void FlushPendingMessages();
     // ---- IFrpProcessCallback 接口 ----
     void OnOutput(FrpMode mode, const char* line, int len) override;
     void OnExit(FrpMode mode, DWORD exitCode) override;
@@ -97,6 +105,23 @@ private:
     FILETIME frpcExeLastWrite_ = {};
     FILETIME frpsExeLastWrite_ = {};
 
+    // 版本号缓存，避免频繁调用 frpc -v
+    std::wstring cachedFrpVer_;
+    bool versionDirty_ = true;
+
+    // DetectionInfo 缓存，避免频繁磁盘 IO
+    Settings::DetectionInfo cachedInfo_;
+    bool infoDirty_ = true;
+
+    // 单实例互斥体
+    HANDLE hSingletonMutex_ = nullptr;
+
+    // TaskbarCreated 消息注册 ID
+    UINT wmTaskbarCreated_ = 0;
+
+    // 窗口类背景刷（需手动释放）
+    HBRUSH hBgBrush_ = nullptr;
+
     // 布局常量
     static const int TOOLBAR_H = 110;
     static const int STATUS_H = 24;
@@ -105,4 +130,10 @@ private:
 
     // 托盘气泡防抖计时
     ULONGLONG lastBalloonTick_ = 0;
+
+    // 多语言状态
+    Lang currentLang_ = LangZh;
+
+    // RefreshSummary 的 DetectionInfo 读取方法
+    const Settings::DetectionInfo& GetCachedInfo();
 };

@@ -90,6 +90,7 @@ namespace {
 
 } // anonymous namespace
 
+// 解析 TOML 配置文件到 FrpConfig 结构体
 bool TomlHelper::Load(const std::wstring& path, FrpConfig& out) {
     try {
         out = {};
@@ -133,6 +134,7 @@ bool TomlHelper::Load(const std::wstring& path, FrpConfig& out) {
     }
 }
 
+// UTF-8 字符串转 Unicode 宽字符串
 std::wstring TomlHelper::Utf8ToWide(std::string_view text) {
     if (text.empty()) return {};
     int len = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);

@@ -32,7 +32,8 @@ public:
 
     DetectionInfo Detect() const;
     static std::wstring AutoDetectFrpRoot();
-    bool ShowDialog(HWND owner);
+    bool ShowDialog(HWND owner, bool zh);
+    HWND GetDialogHwnd() const { return hwndDialog_; }
 
     // 初始化清理（供外部按需调用）
     void SetMainWindow(MainWindow* main) { m_pMain = main; }
@@ -43,5 +44,6 @@ private:
     static const wchar_t* REG_KEY;
     static const wchar_t* VAL_FRP_ROOT;
     static const wchar_t* VAL_AUTO_START;
+    HWND hwndDialog_ = nullptr;
     MainWindow* m_pMain = nullptr;
 };

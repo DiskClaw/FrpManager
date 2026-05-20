@@ -1,8 +1,7 @@
 /**
  * Window.cpp - 主窗口实现
  *
- * 提供窗口创建、进程生命周期管理、摘要刷新、配置文件监控
- * 以及 FRP 版本自动检测等功能。
+ * 窗口创建、进程生命周期管理、配置摘要、文件监控、版本检测
  */
 #include "Window.h"
 #include <shellapi.h>
@@ -32,9 +31,9 @@ namespace {
             (HMENU)(INT_PTR)id, GetModuleHandle(nullptr), nullptr);
     }
 
-    // 将可选数值转换为宽字符串，失败显示“未设置”
-    std::wstring ToWString(const std::optional<int>& val) {
-        return val.has_value() ? std::to_wstring(*val) : L"未设置";
+    // 将可选数值转换为宽字符串，失败显示"未设置"或"Not Set"
+    std::wstring ToWString(const std::optional<int>& val, bool zh) {
+        return val.has_value() ? std::to_wstring(*val) : (zh ? L"未设置" : L"Not Set");
     }
 
     // 限制编辑框行数，超出则从顶部删除
@@ -131,7 +130,7 @@ namespace {
             return L"";
 
         // 构建命令行
-        std::wstring cmdLine = L"\"" + exePath + L"\" -v";
+        std::wstring cmdLine = std::wstring(L"\"") + exePath + L"\" -v";
         std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
         cmdBuf.push_back(L'\0');
 
@@ -194,13 +193,110 @@ namespace {
         CloseHandle(hFile);
         return true;
     }
+
+    // 应用现代 DWM 风格（圆角 + 深色标题栏），兼容 Win8–Win11
+    void ApplyModernStyle(HWND hwnd) {
+        HMODULE hDwm = LoadLibraryW(L"dwmapi.dll");
+        if (!hDwm) return;
+        using DwmSetAttr = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+        auto pfn = (DwmSetAttr)GetProcAddress(hDwm, "DwmSetWindowAttribute");
+        if (pfn) {
+            DWORD c = 2; pfn(hwnd, 33, &c, sizeof(c)); // 圆角（Win11）
+        }
+        FreeLibrary(hDwm);
+    }
+    // 自动检测系统语言：中文区返回 true，否则 false
+    bool IsChineseLocale() {
+        LANGID langId = GetSystemDefaultUILanguage();
+        WORD primLang = PRIMARYLANGID(langId);
+        return primLang == LANG_CHINESE;
+    }
+
+    // 多语言字符串索引
+    enum StrId {
+        S_ADMIN, S_NON_ADMIN, S_STOPPED, S_MISS_FRPC, S_MISS_FRPS,
+        S_RUNNING, S_READY, S_NO_CONFIG, S_LABEL_AUTO_START,
+        S_EXIT, S_SHOW, S_SWITCH_TO_EN, S_SWITCH_TO_ZH,
+        S_BTN_SETTINGS, S_BTN_START, S_BTN_STOP,
+        S_TRAY_TOOLTIP,
+        S_HDR_SERVER_ADDR, S_HDR_LOG_FILE, S_HDR_LOG_LEVEL, S_HDR_LOG_DAYS,
+        S_HDR_LOG_PORT, S_HDR_HTTP_PORT, S_HDR_HTTPS_PORT,
+        S_HDR_DASH_ADDR, S_HDR_DASH_USER, S_HDR_DASH_PWD,
+        S_LOCAL, S_REMOTE,
+        S_BALLOON_NOTICE, S_BALLOON_CLEANED, S_BALLOON_EXIT_ERROR,
+        S_MSG_START_FAILED, S_MSG_ERROR, S_MSG_FRPC_RUNNING, S_MSG_FRPS_RUNNING,
+        S_MSG_FRPC_STARTED, S_MSG_FRPS_STARTED, S_MSG_FRPC_STOPPED, S_MSG_FRPS_STOPPED,
+        S_MSG_FRPC_EXIT, S_MSG_FRPS_EXIT, S_MSG_CLEANUP,
+        S_MSG_FRPC_ALREADY_RUNNING, S_MSG_FRPS_ALREADY_RUNNING,
+        S_MSG_FRPC_STILL_RUNNING, S_MSG_FRPS_STILL_RUNNING,
+        S_MSG_SET_ROOT_FIRST, S_AUTO_START_ENABLED, S_AUTO_START_DISABLED,
+        S_SETTINGS_UPDATED,
+        S_COUNT
+    };
+
+    // 中英文字符串表（STR[id][0]=中文，STR[id][1]=英文）
+    const wchar_t* STR[S_COUNT][2] = {
+        /* S_ADMIN */           { L" [管理员]",           L" [Admin]" },
+        /* S_NON_ADMIN */       { L" [非管理员]",         L" [Non-Admin]" },
+        /* S_STOPPED */         { L"已停止",              L"Stopped" },
+        /* S_MISS_FRPC */       { L"缺少 frpc.exe",       L"frpc.exe missing" },
+        /* S_MISS_FRPS */       { L"缺少 frps.exe",       L"frps.exe missing" },
+        /* S_RUNNING */         { L"运行中",              L"Running" },
+        /* S_READY */           { L"就绪",                L"Ready" },
+        /* S_NO_CONFIG */       { L"未找到配置文件。",     L"Config file not found." },
+        /* S_LABEL_AUTO_START */{ L"开机启动",            L"Auto-Start" },
+        /* S_EXIT */            { L"退出",                L"Exit" },
+        /* S_SHOW */            { L"显示窗口",             L"Show Window" },
+        /* S_SWITCH_TO_EN */    { L"EN",                  L"EN" },
+        /* S_SWITCH_TO_ZH */    { L"中文",                L"中文" },
+        /* S_BTN_SETTINGS */    { L"设置",                L"Settings" },
+        /* S_BTN_START */       { L"启动",                L"Start" },
+        /* S_BTN_STOP */        { L"停止",                L"Stop" },
+        /* S_TRAY_TOOLTIP */    { L"FRP 管理器",          L"FRP Manager" },
+        /* S_HDR_SERVER_ADDR */ { L"服务端地址",           L"Server" },
+        /* S_HDR_LOG_FILE */   { L"日志文件",             L"Log" },
+        /* S_HDR_LOG_LEVEL */   { L"日志等级",             L"Log Level" },
+        /* S_HDR_LOG_DAYS */   { L"日志保留",             L"Retention" },
+        /* S_HDR_LOG_PORT */   { L"监听端口",             L"Bind Port" },
+        /* S_HDR_HTTP_PORT */   { L"HTTP 端口",           L"HTTP Port" },
+        /* S_HDR_HTTPS_PORT */ { L"HTTPS 端口",           L"HTTPS Port" },
+        /* S_HDR_DASH_ADDR */  { L"管理地址",             L"Dash" },
+        /* S_HDR_DASH_USER */  { L"账户名",               L"User" },
+        /* S_HDR_DASH_PWD */   { L"管理密码",             L"Password" },
+        /* S_LOCAL */           { L"本地:",                L"Local:" },
+        /* S_REMOTE */          { L" → 远程:",             L" -> Remote:" },
+        /* S_BALLOON_NOTICE */  { L"提示",                L"Notice" },
+        /* S_BALLOON_CLEANED */ { L"清理完成",            L"Cleaned" },
+        /* S_BALLOON_EXIT_ERROR */  { L"异常退出",         L"Error" },
+        /* S_MSG_START_FAILED */ { L"请先在设置中配置 frp 目录", L"Please configure FRP root in Settings first" },
+        /* S_MSG_ERROR */       { L"错误",                L"Error" },
+        /* S_MSG_FRPC_RUNNING */ { L"frpc 正在运行。",    L"frpc is already running." },
+        /* S_MSG_FRPS_RUNNING */ { L"frps 正在运行。",    L"frps is already running." },
+        /* S_MSG_FRPC_STARTED */ { L"frpc 已启动",       L"frpc started" },
+        /* S_MSG_FRPS_STARTED */ { L"frps 已启动",       L"frps started" },
+        /* S_MSG_FRPC_STOPPED */ { L"frpc 已停止",        L"frpc stopped" },
+        /* S_MSG_FRPS_STOPPED */ { L"frps 已停止",        L"frps stopped" },
+        /* S_MSG_FRPC_EXIT */   { L"frpc 已退出，代码 ", L"frpc exited, code " },
+        /* S_MSG_FRPS_EXIT */   { L"frps 已退出，代码 ", L"frps exited, code " },
+        /* S_MSG_CLEANUP */     { L"，清理了 ",           L", cleaned " },
+        /* S_MSG_FRPC_ALREADY_RUNNING */ { L"frpc 已在运行中，请先停止后再启动。", L"frpc is already running. Stop it first." },
+        /* S_MSG_FRPS_ALREADY_RUNNING */ { L"frps 已在运行中，请先停止后再启动。", L"frps is already running. Stop it first." },
+        /* S_MSG_FRPC_STILL_RUNNING */ { L"frpc 仍在运行，无法启动。", L"frpc is still running." },
+        /* S_MSG_FRPS_STILL_RUNNING */ { L"frps 仍在运行，无法启动。", L"frps is still running." },
+        /* S_MSG_SET_ROOT_FIRST */ { L"请先在设置中配置 frp 目录。", L"Please set FRP root in Settings first." },
+        /* S_AUTO_START_ENABLED */ { L"已开启开机自启",    L"Auto-start enabled" },
+        /* S_AUTO_START_DISABLED */ { L"已关闭开机自启",   L"Auto-start disabled" },
+        /* S_SETTINGS_UPDATED */ { L"设置已更新",         L"Settings updated" },
+    };
+
+    inline const wchar_t* Ls(StrId id, bool zh) { return STR[id][zh ? 0 : 1]; }
 } // anonymous namespace
 
-// ---- 构造与析构 ----
 MainWindow::MainWindow() {
     frpc_.SetCallback(this);
     frps_.SetCallback(this);
     settings_.SetMainWindow(this);
+    currentLang_ = IsChineseLocale() ? LangZh : LangEn;
 }
 
 MainWindow::~MainWindow() {
@@ -209,9 +305,11 @@ MainWindow::~MainWindow() {
     delete tray_;
     if (hFont_)     DeleteObject(hFont_);
     if (hBoldFont_) DeleteObject(hBoldFont_);
+    if (hBgBrush_)  DeleteObject(hBgBrush_);
+    if (hSingletonMutex_) { ReleaseMutex(hSingletonMutex_); CloseHandle(hSingletonMutex_); }
 }
 
-// ---- 注册窗口类 ----
+// 注册窗口类（图标、光标、背景刷、窗口过程）
 bool MainWindow::RegisterClass() {
     WNDCLASSEXW wc{ sizeof(WNDCLASSEXW) };
     wc.lpfnWndProc = MainWindow::WndProc;
@@ -220,13 +318,29 @@ bool MainWindow::RegisterClass() {
     if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm = wc.hIcon;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+    wc.hbrBackground = (hBgBrush_ = CreateSolidBrush(RGB(240, 240, 240)));
     wc.lpszClassName = CLASS_NAME;
     return RegisterClassExW(&wc) != 0;
 }
 
-// ---- 创建主窗口及所有子控件 ----
+// 创建窗口、初始化所有子控件、设置字体、启动托盘图标
 HWND MainWindow::CreateWindow_() {
+    // 单实例检查：如果已有实例运行则激活它并退出
+    hSingletonMutex_ = CreateMutexW(nullptr, TRUE, L"FrpManager_Singleton");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        // 查找已有窗口并前置
+        HWND existing = FindWindowW(CLASS_NAME, nullptr);
+        if (existing) {
+            ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+        }
+        if (hSingletonMutex_) { CloseHandle(hSingletonMutex_); hSingletonMutex_ = nullptr; }
+        return nullptr;
+    }
+
+    // 注册 TaskbarCreated 消息，用于 explorer 崩溃后重建托盘图标
+    wmTaskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
+
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
     const int screenH = GetSystemMetrics(SM_CYSCREEN);
     const int winW = 420, winH = 520;
@@ -240,6 +354,7 @@ HWND MainWindow::CreateWindow_() {
         winW, winH,
         nullptr, nullptr, GetModuleHandle(nullptr), this);
     if (!hwnd_) return nullptr;
+    ApplyModernStyle(hwnd_);
 
     // 创建字体
     hFont_ = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -250,19 +365,20 @@ HWND MainWindow::CreateWindow_() {
         CLEARTYPE_QUALITY, DEFAULT_CHARSET, L"Microsoft YaHei UI");
 
     // 初始化根目录并获取版本号用于标题
-    std::wstring frpVer;
     {
         std::wstring root = settings_.GetFrpRoot();
         if (root.empty()) {
             root = Settings::AutoDetectFrpRoot();
             if (!root.empty()) settings_.SetFrpRoot(root);
         }
-        auto info = settings_.Detect();
-        std::wstring exePath = info.frpcExe.empty() ? info.frpsExe : info.frpcExe;
-        frpVer = GetExeVersionByCommand(exePath);
     }
-    if (frpVer.empty()) frpVer = L"未知";
-    std::wstring versionTitle = L"FRP 版本：" + frpVer;
+    infoDirty_ = true;
+    cachedInfo_ = GetCachedInfo();
+    std::wstring exePath = cachedInfo_.frpcExe.empty() ? cachedInfo_.frpsExe : cachedInfo_.frpcExe;
+    cachedFrpVer_ = GetExeVersionByCommand(exePath);
+    versionDirty_ = false;
+    if (cachedFrpVer_.empty()) cachedFrpVer_ = L"未知";
+    std::wstring versionTitle = (currentLang_ == LangZh ? L"FRP 版本：" : L"FRP Version: ") + cachedFrpVer_;
 
     // 顶部区域
     hwndTitle_ = CreateText(hwnd_, versionTitle.c_str(), SS_LEFT);
@@ -304,7 +420,7 @@ HWND MainWindow::CreateWindow_() {
         hwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
     hwndStatusBar_ = CreateText(hwnd_, L"就绪", SS_LEFT);
     hwndChkAutoStart_ = CreateWindowExW(0, L"BUTTON", L"开机启动",
-        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 80, 20,
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 95, 20,
         hwnd_, (HMENU)106, GetModuleHandle(nullptr), nullptr);
     if (settings_.GetAutoStart())
         SendMessageW(hwndChkAutoStart_, BM_SETCHECK, BST_CHECKED, 0);
@@ -313,7 +429,8 @@ HWND MainWindow::CreateWindow_() {
     for (HWND child : { hwndBtnSettings_,
         hwndFrpcLabel_, hwndFrpcStatus_, hwndBtnFrpcStart_, hwndBtnFrpcStop_,
         hwndFrpsLabel_, hwndFrpsStatus_, hwndBtnFrpsStart_, hwndBtnFrpsStop_,
-        hwndFrpcCard_, hwndFrpsCard_, hwndDivider_, hwndStatusBar_, hwndChkAutoStart_ })
+        hwndFrpcCard_, hwndFrpsCard_, hwndDivider_, hwndStatusBar_,
+        hwndChkAutoStart_ })
         SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(hFont_), TRUE);
     SendMessageW(hwndTitle_, WM_SETFONT, reinterpret_cast<WPARAM>(hBoldFont_), TRUE);
 
@@ -323,12 +440,11 @@ HWND MainWindow::CreateWindow_() {
         root = Settings::AutoDetectFrpRoot();
         if (!root.empty()) settings_.SetFrpRoot(root);
     }
-    if (root.empty()) ShowSettingsDialog(); else SetFrpRoot(root);
+    if (root.empty()) ShowSettingsDialog(); else { SetFrpRoot(root); infoDirty_ = true; }
 
     // 初始化文件时间戳缓存
-    auto info = settings_.Detect();
-    GetFileLastWrite(info.frpcExe, frpcExeLastWrite_);
-    GetFileLastWrite(info.frpsExe, frpsExeLastWrite_);
+    GetFileLastWrite(cachedInfo_.frpcExe, frpcExeLastWrite_);
+    GetFileLastWrite(cachedInfo_.frpsExe, frpsExeLastWrite_);
 
     for (auto mode : { FrpMode::Client, FrpMode::Server }) {
         std::wstring cfg = ConfigPathForMode(mode);
@@ -348,6 +464,9 @@ HWND MainWindow::CreateWindow_() {
     tray_->Create(hwnd_, this, L"FRP 管理器");
     SetTimer(hwnd_, 1, 2000, nullptr);  // 2 秒周期检查文件变化
 
+    // 应用系统语言并刷新界面
+    ApplyLang();
+
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
     UpdateProcessControls();
@@ -356,25 +475,27 @@ HWND MainWindow::CreateWindow_() {
     return hwnd_;
 }
 
-// ---- 设置根目录并刷新界面 ----
+// 设置 FRP 根目录，刷新控件状态和摘要文本，更新版本标题
 void MainWindow::SetFrpRoot(const std::wstring& path) {
     settings_.SetFrpRoot(path);
+    infoDirty_ = true;
+    cachedInfo_ = GetCachedInfo();
     UpdateProcessControls();
     RefreshSummary();
 
-    // 重新获取并显示版本号
-    auto info = settings_.Detect();
-    std::wstring exePath = info.frpcExe.empty() ? info.frpsExe : info.frpcExe;
-    std::wstring frpVer = GetExeVersionByCommand(exePath);
-    if (frpVer.empty()) frpVer = L"未知";
-    SetWindowTextW(hwndTitle_, (L"FRP 版本：" + frpVer).c_str());
+    // 更新版本号缓存
+    std::wstring exePath = cachedInfo_.frpcExe.empty() ? cachedInfo_.frpsExe : cachedInfo_.frpcExe;
+    cachedFrpVer_ = GetExeVersionByCommand(exePath);
+    versionDirty_ = false;
+    if (cachedFrpVer_.empty()) cachedFrpVer_ = currentLang_ == LangZh ? L"未知" : L"Unknown";
+    SetWindowTextW(hwndTitle_, ((currentLang_ == LangZh ? L"FRP 版本：" : L"FRP Version: ") + cachedFrpVer_).c_str());
 
     // 更新可执行文件时间戳缓存
-    GetFileLastWrite(info.frpcExe, frpcExeLastWrite_);
-    GetFileLastWrite(info.frpsExe, frpsExeLastWrite_);
+    GetFileLastWrite(cachedInfo_.frpcExe, frpcExeLastWrite_);
+    GetFileLastWrite(cachedInfo_.frpsExe, frpsExeLastWrite_);
 }
 
-// ---- 刷新两个摘要卡片 ----
+// 刷新 frpc/frps 摘要卡片文本，根据内容行数自动显示或隐藏滚动条
 void MainWindow::RefreshSummary() {
     for (auto mode : { FrpMode::Client, FrpMode::Server }) {
         std::wstring cfg = ConfigPathForMode(mode);
@@ -383,13 +504,13 @@ void MainWindow::RefreshSummary() {
         // 首行：配置文件名
         std::wstring text;
         if (cfg.empty()) {
-            text = L"未找到配置文件";
+            text = Ls(S_NO_CONFIG, currentLang_ == LangZh);
         }
         else {
             const wchar_t* name = wcsrchr(cfg.c_str(), L'\\');
             text = name ? std::wstring(name + 1) : cfg;
         }
-        text += L"\r\n" + BuildSummaryText(mode);
+        text += std::wstring(L"\r\n") + BuildSummaryText(mode);
         SetWindowTextW(hEdit, text.c_str());
 
         // 根据内容行数决定是否显示垂直滚动条
@@ -410,9 +531,10 @@ void MainWindow::RefreshSummary() {
 // ---- 定时检查配置文件及 exe 版本变化 ----
 void MainWindow::CheckConfigChanges() {
     bool changed = false;
-    auto info = settings_.Detect();
+    if (infoDirty_) { cachedInfo_ = GetCachedInfo(); infoDirty_ = false; }
+    auto& info = cachedInfo_;
 
-    // 检查可执行文件修改并自动刷新顶部版本标题
+    // 检查可执行文件修改：只在时间戳变化时才重新跑 frpc -v
     auto checkExeVersion = [&](const std::wstring& exePath, FILETIME& cachedTime) {
         FILETIME currentTime{};
         bool fileExists = GetFileLastWrite(exePath, currentTime);
@@ -423,7 +545,6 @@ void MainWindow::CheckConfigChanges() {
                 exeChanged = true;
         }
         else {
-            // 文件不存在：如果之前缓存非空则表示被删除
             FILETIME zero{};
             if (CompareFileTime(&cachedTime, &zero) != 0) {
                 exeChanged = true;
@@ -433,14 +554,22 @@ void MainWindow::CheckConfigChanges() {
 
         if (exeChanged) {
             cachedTime = currentTime;
-            std::wstring ver = GetExeVersionByCommand(exePath);
-            if (ver.empty()) ver = L"未知";
-            SetWindowTextW(hwndTitle_, (L"FRP 版本：" + ver).c_str());
+            versionDirty_ = true;
         }
         };
 
     checkExeVersion(info.frpcExe, frpcExeLastWrite_);
     checkExeVersion(info.frpsExe, frpsExeLastWrite_);
+
+    // 只在标记脏时才跑一次版本查询
+    if (versionDirty_) {
+        std::wstring exePath = info.frpcExe.empty() ? info.frpsExe : info.frpcExe;
+        cachedFrpVer_ = GetExeVersionByCommand(exePath);
+        if (cachedFrpVer_.empty()) cachedFrpVer_ = currentLang_ == LangZh ? L"未知" : L"Unknown";
+        bool zh = (currentLang_ == LangZh);
+        SetWindowTextW(hwndTitle_, ((zh ? L"FRP 版本：" : L"FRP Version: ") + cachedFrpVer_).c_str());
+        versionDirty_ = false;
+    }
 
     // 检查配置文件变化
     for (auto mode : { FrpMode::Client, FrpMode::Server }) {
@@ -468,7 +597,8 @@ void MainWindow::CheckConfigChanges() {
 
 // ---- 根据实际文件状态更新进程控制按钮 ----
 void MainWindow::UpdateProcessControls() {
-    auto info = settings_.Detect();
+    if (infoDirty_) { cachedInfo_ = GetCachedInfo(); infoDirty_ = false; }
+    auto& info = cachedInfo_;
     bool frpcExeExists = !info.frpcExe.empty() && PathFileExistsW(info.frpcExe.c_str());
     bool frpsExeExists = !info.frpsExe.empty() && PathFileExistsW(info.frpsExe.c_str());
     bool frpcCfgExists = !info.frpcConfig.empty() && PathFileExistsW(info.frpcConfig.c_str());
@@ -477,18 +607,22 @@ void MainWindow::UpdateProcessControls() {
     bool frpcRunning = frpc_.IsRunning() || (frpcExeExists && IsExactExeRunning(info.frpcExe));
     bool frpsRunning = frps_.IsRunning() || (frpsExeExists && IsExactExeRunning(info.frpsExe));
 
-    SetWindowTextW(hwndFrpcStatus_, frpcRunning ? L"运行中" : (frpcExeExists ? L"已停止" : L"缺少 frpc.exe"));
-    SetWindowTextW(hwndFrpsStatus_, frpsRunning ? L"运行中" : (frpsExeExists ? L"已停止" : L"缺少 frps.exe"));
+    bool zh = (currentLang_ == LangZh);
+    SetWindowTextW(hwndFrpcStatus_, frpcRunning ? Ls(S_RUNNING, zh) :
+        (frpcExeExists ? Ls(S_STOPPED, zh) : Ls(S_MISS_FRPC, zh)));
+    SetWindowTextW(hwndFrpsStatus_, frpsRunning ? Ls(S_RUNNING, zh) :
+        (frpsExeExists ? Ls(S_STOPPED, zh) : Ls(S_MISS_FRPS, zh)));
     EnableWindow(hwndBtnFrpcStart_, !frpcRunning && frpcExeExists && frpcCfgExists);
     EnableWindow(hwndBtnFrpcStop_, frpcRunning);
     EnableWindow(hwndBtnFrpsStart_, !frpsRunning && frpsExeExists && frpsCfgExists);
     EnableWindow(hwndBtnFrpsStop_, frpsRunning);
 
-    if (settings_.GetFrpRoot().empty())
+    if (settings_.GetFrpRoot().empty()) {
         SetWindowTextW(hwndStatusBar_, L"请先在设置中选择 frp 根目录");
+    }
 }
 
-// ---- 窗口尺寸变化时重新布局 ----
+// 响应 WM_SIZE，重新计算并布局所有子控件位置
 void MainWindow::OnSize(int w, int h) {
     constexpr int PAD = 20;
     const int contentWidth = (w > 380) ? 380 : (w - PAD * 2);
@@ -531,8 +665,9 @@ void MainWindow::OnSize(int w, int h) {
 
     // 状态栏与自启复选框
     ShowWindow(hwndDivider_, SW_HIDE);
-    SetWindowPos(hwndStatusBar_, nullptr, gx, h - PAD - STATUS_H, rightEdge - gx - 90, STATUS_H, SWP_NOZORDER);
-    SetWindowPos(hwndChkAutoStart_, nullptr, rightEdge - 80, h - PAD - STATUS_H, 80, STATUS_H, SWP_NOZORDER);
+    const int autoX = rightEdge - 95 - 6;
+    SetWindowPos(hwndStatusBar_, nullptr, gx, h - PAD - STATUS_H, autoX - gx - 4, STATUS_H, SWP_NOZORDER);
+    SetWindowPos(hwndChkAutoStart_, nullptr, autoX, h - PAD - STATUS_H, 95, STATUS_H, SWP_NOZORDER);
 }
 
 // ---- 命令处理（按钮点击） ----
@@ -543,67 +678,75 @@ void MainWindow::OnCommand(int id) {
     case 103: ShowSettingsDialog();           break;
     case 104: StartProcess(FrpMode::Server);  break;
     case 105: StopProcess(FrpMode::Server);   break;
-    case 106:
+    case 106: {
+        bool zh = (currentLang_ == LangZh);
         settings_.SetAutoStart(
             SendMessageW(hwndChkAutoStart_, BM_GETCHECK, 0, 0) == BST_CHECKED);
         SetWindowTextW(hwndStatusBar_,
-            settings_.GetAutoStart() ? L"已开启开机自启" : L"已关闭开机自启");
+            settings_.GetAutoStart() ? Ls(S_AUTO_START_ENABLED, zh) : Ls(S_AUTO_START_DISABLED, zh));
         break;
+    }
     }
 }
 
 // ---- 显示设置对话框 ----
 bool MainWindow::ShowSettingsDialog() {
-    bool ok = settings_.ShowDialog(hwnd_);
+    bool zh = (currentLang_ == LangZh);
+    bool ok = settings_.ShowDialog(hwnd_, zh);
     if (ok) {
         UpdateProcessControls();
         RefreshSummary();
-        SetWindowTextW(hwndStatusBar_, L"设置已更新");
+        SetWindowTextW(hwndStatusBar_, Ls(S_SETTINGS_UPDATED, zh));
     }
     return ok;
 }
 
 // ---- 启动指定模式进程 ----
 void MainWindow::StartProcess(FrpMode mode) {
+    bool zh = (currentLang_ == LangZh);
+    if (infoDirty_) { cachedInfo_ = GetCachedInfo(); infoDirty_ = false; }
     const std::wstring exePath = (mode == FrpMode::Client)
-        ? settings_.GetFrpcExe() : settings_.GetFrpsExe();
+        ? cachedInfo_.frpcExe : cachedInfo_.frpsExe;
     const std::wstring cfgPath = ConfigPathForMode(mode);
     const std::wstring rootDir = settings_.GetFrpRoot();
 
     if (exePath.empty() || cfgPath.empty() || rootDir.empty()) {
-        MessageBoxW(hwnd_, L"请先在设置中配置 frp 目录。", L"启动失败", MB_ICONERROR);
+        MessageBoxW(hwnd_, Ls(S_MSG_START_FAILED, zh), Ls(S_MSG_ERROR, zh), MB_ICONERROR);
         return;
     }
 
     if (IsExactExeRunning(exePath)) {
-        std::wstring msg = std::wstring(ModeName(mode)) + L" 已在运行中，请先停止后再启动。";
-        SetWindowTextW(hwndStatusBar_, msg.c_str());
-        if (tray_) tray_->ShowBalloon(L"提示", msg.c_str(), 2000);
+        const wchar_t* msg = mode == FrpMode::Client ? Ls(S_MSG_FRPC_ALREADY_RUNNING, zh) : Ls(S_MSG_FRPS_ALREADY_RUNNING, zh);
+        SetWindowTextW(hwndStatusBar_, msg);
+        if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_NOTICE, zh), msg, 2000);
         UpdateProcessControls();
         return;
     }
 
     if (ProcessForMode(mode).IsRunning()) {
-        SetWindowTextW(hwndStatusBar_,
-            (std::wstring(ModeName(mode)) + L" 正在运行。").c_str());
+        const wchar_t* msg = mode == FrpMode::Client ? Ls(S_MSG_FRPC_STILL_RUNNING, zh) : Ls(S_MSG_FRPS_STILL_RUNNING, zh);
+        SetWindowTextW(hwndStatusBar_, msg);
         return;
     }
 
-    if (ProcessForMode(mode).Start(exePath, cfgPath, rootDir))
-        SetWindowTextW(hwndStatusBar_,
-            (std::wstring(ModeName(mode)) + L" 已启动").c_str());
-    else
-        MessageBoxW(hwnd_,
-            (std::wstring(L"启动 ") + ModeName(mode) + L" 失败").c_str(),
-            L"错误", MB_ICONERROR);
+    if (ProcessForMode(mode).Start(exePath, cfgPath, rootDir)) {
+        const wchar_t* msg = mode == FrpMode::Client ? Ls(S_MSG_FRPC_STARTED, zh) : Ls(S_MSG_FRPS_STARTED, zh);
+        SetWindowTextW(hwndStatusBar_, msg);
+    }
+    else {
+        std::wstring txt = std::wstring(L"Start ") + ModeName(mode) + (zh ? L" 失败" : L" failed");
+        MessageBoxW(hwnd_, txt.c_str(), Ls(S_MSG_ERROR, zh), MB_ICONERROR);
+    }
 
     UpdateProcessControls();
 }
 
-// ---- 停止指定模式进程 ----
+// 停止指定模式进程，清理同名残留进程并更新界面
 void MainWindow::StopProcess(FrpMode mode) {
+    bool zh = (currentLang_ == LangZh);
+    if (infoDirty_) { cachedInfo_ = GetCachedInfo(); infoDirty_ = false; }
     const std::wstring exePath = (mode == FrpMode::Client)
-        ? settings_.GetFrpcExe() : settings_.GetFrpsExe();
+        ? cachedInfo_.frpcExe : cachedInfo_.frpsExe;
 
     ProcessForMode(mode).Stop();
 
@@ -611,132 +754,183 @@ void MainWindow::StopProcess(FrpMode mode) {
     if (!exePath.empty())
         cleaned = KillSamePathExe(exePath);
 
-    std::wstring msg = std::wstring(ModeName(mode)) + L" 已停止";
-    if (cleaned > 0) msg += L"，清理了 " + std::to_wstring(cleaned) + L" 个残留进程";
+    const wchar_t* stopped = mode == FrpMode::Client ? Ls(S_MSG_FRPC_STOPPED, zh) : Ls(S_MSG_FRPS_STOPPED, zh);
+    std::wstring msg = stopped;
+    if (cleaned > 0) {
+        msg += std::wstring(Ls(S_MSG_CLEANUP, zh)) + std::to_wstring(cleaned) + (zh ? L" 个残留进程" : L" leftover processes");
+    }
 
     SetWindowTextW(hwndStatusBar_, msg.c_str());
-    if (tray_) tray_->ShowBalloon(L"清理完成", msg.c_str(), 2000);
+    if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_CLEANED, zh), msg.c_str(), 2000);
 
     UpdateProcessControls();
     RefreshSummary();
 }
 
-// ---- 进程退出回调（UI 更新） ----
+// 进程异常退出时更新状态栏、显示气泡提示并刷新界面
 void MainWindow::HandleProcessExitUi(FrpMode mode, DWORD exitCode) {
-    std::wstring msg = std::wstring(ModeName(mode))
-        + L" 已退出，代码 " + std::to_wstring(exitCode);
+    bool zh = (currentLang_ == LangZh);
+    const wchar_t* exitPrefix = mode == FrpMode::Client ? Ls(S_MSG_FRPC_EXIT, zh) : Ls(S_MSG_FRPS_EXIT, zh);
+    std::wstring msg = std::wstring(exitPrefix) + std::to_wstring(exitCode);
     if (!exiting_ && exitCode != 0 && tray_)
-        tray_->ShowBalloon(L"异常退出", msg.c_str(), 2000);
+        tray_->ShowBalloon(Ls(S_BALLOON_EXIT_ERROR, zh), msg.c_str(), 2000);
 
     SetWindowTextW(hwndStatusBar_, msg.c_str());
     UpdateProcessControls();
     RefreshSummary();
 }
 
-// ---- 快捷获取对应模式的进程对象 ----
+// 根据模式返回对应的 FrpProcess 引用
 FrpProcess& MainWindow::ProcessForMode(FrpMode mode) {
     return (mode == FrpMode::Client) ? frpc_ : frps_;
 }
 
+// 返回模式对应的进程名称字符串
 const wchar_t* MainWindow::ModeName(FrpMode mode) const {
     return (mode == FrpMode::Client) ? L"frpc" : L"frps";
 }
 
+// 返回模式对应的配置文件路径
 std::wstring MainWindow::ConfigPathForMode(FrpMode mode) const {
-    return (mode == FrpMode::Client) ? settings_.GetFrpcConfig() : settings_.GetFrpsConfig();
+    return (mode == FrpMode::Client) ? cachedInfo_.frpcConfig : cachedInfo_.frpsConfig;
 }
 
-// ---- 构建摘要卡片详细内容（不含版本号，已显示在顶部标题） ----
+// 获取缓存的 DetectionInfo，仅脏时重新检测
+const Settings::DetectionInfo& MainWindow::GetCachedInfo() {
+    if (infoDirty_) {
+        cachedInfo_ = settings_.Detect();
+        infoDirty_ = false;
+    }
+    return cachedInfo_;
+}
+
+// 根据配置文件构建摘要文本（服务端地址、端口、代理信息等）
 std::wstring MainWindow::BuildSummaryText(FrpMode mode) const {
     std::wstring cfg = ConfigPathForMode(mode);
-    if (cfg.empty()) return L"未找到配置文件。";
+    if (cfg.empty()) return Ls(S_NO_CONFIG, currentLang_ == LangZh);
     FrpConfig parsed;
-    if (!TomlHelper::Load(cfg, parsed)) return L"配置文件读取失败。";
+    if (!TomlHelper::Load(cfg, parsed)) return currentLang_ == LangZh ? L"配置文件读取失败。" : L"Failed to read config file.";
+    bool zh = (currentLang_ == LangZh);
 
     std::wstring txt;
     if (mode == FrpMode::Client) {
         if (parsed.common_server_addr) {
-            txt += L"服务端地址：" + TomlHelper::Utf8ToWide(*parsed.common_server_addr);
+            txt += std::wstring(Ls(S_HDR_SERVER_ADDR, zh)) + L": " + TomlHelper::Utf8ToWide(*parsed.common_server_addr);
             if (parsed.common_server_port)
                 txt += L":" + std::to_wstring(*parsed.common_server_port);
             txt += L"\r\n";
         }
         if (parsed.common_log_file)
-            txt += L"日志文件：" + TomlHelper::Utf8ToWide(*parsed.common_log_file) + L"\r\n";
+            txt += std::wstring(Ls(S_HDR_LOG_FILE, zh)) + L": " + TomlHelper::Utf8ToWide(*parsed.common_log_file) + L"\r\n";
         if (parsed.common_log_level)
-            txt += L"日志等级：" + TomlHelper::Utf8ToWide(*parsed.common_log_level) + L"\r\n";
+            txt += std::wstring(Ls(S_HDR_LOG_LEVEL, zh)) + L": " + TomlHelper::Utf8ToWide(*parsed.common_log_level) + L"\r\n";
         if (parsed.common_log_max_days)
-            txt += L"日志保留：" + std::to_wstring(*parsed.common_log_max_days) + L" 天\r\n";
+            txt += std::wstring(Ls(S_HDR_LOG_DAYS, zh)) + L": " + std::to_wstring(*parsed.common_log_max_days) + (zh ? L" 天\r\n" : L" days\r\n");
         for (const auto& p : parsed.proxies) {
             txt += TomlHelper::Utf8ToWide(p.name) + L" (" + TomlHelper::Utf8ToWide(p.type) + L") ";
-            if (p.localPort)  txt += L"本地:" + std::to_wstring(*p.localPort);
-            if (p.remotePort) txt += L" → 远程:" + std::to_wstring(*p.remotePort);
+            if (p.localPort)  txt += std::wstring(Ls(S_LOCAL, zh)) + L" " + std::to_wstring(*p.localPort);
+            if (p.remotePort) txt += std::wstring(Ls(S_REMOTE, zh)) + L" " + std::to_wstring(*p.remotePort);
             txt += L"\r\n";
         }
     }
     else {  // Server
-        txt += L"监听端口：" + ToWString(parsed.bind_port);
-        txt += L"\r\nHTTP 端口：" + ToWString(parsed.vhost_http_port);
-        txt += L"\r\nHTTPS 端口：" + ToWString(parsed.vhost_https_port);
+        txt += std::wstring(Ls(S_HDR_LOG_PORT, zh)) + L": " + ToWString(parsed.bind_port, zh);
+        txt += std::wstring(L"\r\n") + Ls(S_HDR_HTTP_PORT, zh) + L": " + ToWString(parsed.vhost_http_port, zh);
+        txt += std::wstring(L"\r\n") + Ls(S_HDR_HTTPS_PORT, zh) + L": " + ToWString(parsed.vhost_https_port, zh);
         if (parsed.common_log_file)
-            txt += L"\r\n日志文件：" + TomlHelper::Utf8ToWide(*parsed.common_log_file);
+            txt += std::wstring(L"\r\n") + Ls(S_HDR_LOG_FILE, zh) + L": " + TomlHelper::Utf8ToWide(*parsed.common_log_file);
         if (parsed.common_log_level)
-            txt += L"\r\n日志等级：" + TomlHelper::Utf8ToWide(*parsed.common_log_level);
+            txt += std::wstring(L"\r\n") + Ls(S_HDR_LOG_LEVEL, zh) + L": " + TomlHelper::Utf8ToWide(*parsed.common_log_level);
         if (parsed.common_log_max_days)
-            txt += L"\r\n日志保留：" + std::to_wstring(*parsed.common_log_max_days) + L" 天";
+            txt += std::wstring(L"\r\n") + Ls(S_HDR_LOG_DAYS, zh) + L": " + std::to_wstring(*parsed.common_log_max_days) + (zh ? L" 天" : L" days");
         if (parsed.dashboard_port) {
-            txt += L"\r\n管理地址：http://127.0.0.1:" + std::to_wstring(*parsed.dashboard_port);
+            txt += std::wstring(L"\r\n") + Ls(S_HDR_DASH_ADDR, zh) + L": http://127.0.0.1:" + std::to_wstring(*parsed.dashboard_port);
             if (parsed.dashboard_user)
-                txt += L"\r\n账户名：" + TomlHelper::Utf8ToWide(*parsed.dashboard_user);
+                txt += std::wstring(L"\r\n") + Ls(S_HDR_DASH_USER, zh) + L": " + TomlHelper::Utf8ToWide(*parsed.dashboard_user);
             if (parsed.dashboard_pwd)
-                txt += L"\r\n管理密码：" + TomlHelper::Utf8ToWide(*parsed.dashboard_pwd);
+                txt += std::wstring(L"\r\n") + Ls(S_HDR_DASH_PWD, zh) + L": ***";
         }
     }
     return txt;
 }
 
-// ---- 进程输出回调 ----
+// IFrpProcessCallback：进程输出数据，异步投递到主线程
 void MainWindow::OnOutput(FrpMode mode, const char* line, int len) {
     if (!hwnd_) return;
     auto* event = new OutputEvent{ mode, std::string(line, static_cast<size_t>(len)) };
     PostMessageW(hwnd_, WM_OUTPUT, 0, reinterpret_cast<LPARAM>(event));
 }
 
-// ---- 进程退出回调 ----
+// IFrpProcessCallback：进程退出，异步投递到主线程
 void MainWindow::OnExit(FrpMode mode, DWORD exitCode) {
     if (!hwnd_) return;
     auto* event = new ExitEvent{ mode, exitCode };
     PostMessageW(hwnd_, WM_PROCESS_EXIT, 0, reinterpret_cast<LPARAM>(event));
 }
 
-// ---- 托盘回调 ----
+// ITrayCallback：托盘双击显示窗口
 void MainWindow::OnTrayShow() {
     ShowWindow(hwnd_, SW_RESTORE);
     SetForegroundWindow(hwnd_);
 }
 
+// ITrayCallback：托盘退出请求，标记并关闭
 void MainWindow::OnTrayExit() {
     exiting_ = true;
     PostMessageW(hwnd_, WM_TRAY_EXIT, 0, 0);
 }
 
+// 停止所有进程（供 Settings 对话框调用）
 void MainWindow::StopAllProcesses() {
     frpc_.Stop();
     frps_.Stop();
     UpdateProcessControls();
 }
 
-// ---- 托盘气泡防抖（两次气泡间隔至少 2 秒） ----
-bool MainWindow::CanShowBalloon() const {
-    ULONGLONG now = GetTickCount64();
-    if (now - lastBalloonTick_ < 2000)
-        return false;
-    // 注意：此处需要修改成员变量，但因 const 限制实际需调整
-    // 简单起见直接返回 true（如有需要可移除 const 并更新时间）
-    return true;
+// 切换中英文语言
+void MainWindow::ToggleLang() {
+    currentLang_ = (currentLang_ == LangZh) ? LangEn : LangZh;
+    ApplyLang();
 }
 
-// ---- 静态窗口过程 ----
+// 根据 currentLang_ 更新所有控件文本、托盘菜单及设置窗口语言
+void MainWindow::ApplyLang() {
+    bool zh = (currentLang_ == LangZh);
+    // 更新窗口标题
+    std::wstring title = zh ? L"FRP 管理器" : L"FRP Manager";
+    title += Ls(IsUserAdmin() ? S_ADMIN : S_NON_ADMIN, zh);
+    SetWindowTextW(hwnd_, title.c_str());
+
+    // 更新版本标题（使用缓存，避免每次切换语言都跑一次 frpc -v）
+    if (cachedFrpVer_.empty()) cachedFrpVer_ = zh ? L"未知" : L"Unknown";
+    SetWindowTextW(hwndTitle_, ((zh ? L"FRP 版本：" : L"FRP Version: ") + cachedFrpVer_).c_str());
+
+    // 设置对话框打开时，通知它刷新语言
+    HWND settingsHwnd = settings_.GetDialogHwnd();
+    if (settingsHwnd && IsWindow(settingsHwnd))
+        SendMessageW(settingsHwnd, WM_REFRESH_LANG, zh ? 1 : 0, 0);
+
+    SetWindowTextW(hwndBtnSettings_, Ls(S_BTN_SETTINGS, zh));
+    SetWindowTextW(hwndBtnFrpcStart_, Ls(S_BTN_START, zh));
+    SetWindowTextW(hwndBtnFrpcStop_, Ls(S_BTN_STOP, zh));
+    SetWindowTextW(hwndBtnFrpsStart_, Ls(S_BTN_START, zh));
+    SetWindowTextW(hwndBtnFrpsStop_, Ls(S_BTN_STOP, zh));
+    SetWindowTextW(hwndChkAutoStart_, Ls(S_LABEL_AUTO_START, zh));
+    SetWindowTextW(hwndStatusBar_, Ls(S_READY, zh));
+
+    // 托盘 tooltip 和菜单
+    tray_->SetTooltip(Ls(S_TRAY_TOOLTIP, zh));
+    const wchar_t* showL = Ls(S_SHOW, zh);
+    const wchar_t* langL = (currentLang_ == LangZh) ? Ls(S_SWITCH_TO_EN, zh) : Ls(S_SWITCH_TO_ZH, zh);
+    const wchar_t* exitL = Ls(S_EXIT, zh);
+    tray_->SetMenuStrings(showL, langL, exitL);
+
+    // 刷新状态文字
+    UpdateProcessControls();
+    RefreshSummary();
+}
+
+// 窗口过程静态回调，分发到实例成员 HandleMsg
 LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     MainWindow* self = reinterpret_cast<MainWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (msg == WM_NCCREATE) {
@@ -749,10 +943,19 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
     return self->HandleMsg(msg, wp, lp);
 }
 
-// ---- 实例消息处理 ----
+// 消息处理分发中心，响应所有窗口消息
 LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_TRAYICON) {
         if (tray_) tray_->HandleMsg(hwnd_, msg, wp, lp);
+        return 0;
+    }
+
+    // explorer 崩溃后重建托盘图标
+    if (wmTaskbarCreated_ && msg == wmTaskbarCreated_) {
+        if (tray_) {
+            tray_->Destroy();
+            tray_->Create(hwnd_, this, Ls(S_TRAY_TOOLTIP, currentLang_ == LangZh));
+        }
         return 0;
     }
 
@@ -769,10 +972,15 @@ LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == 1) CheckConfigChanges();
         return 0;
 
+    case WM_TOGGLE_LANG:
+        ToggleLang();
+        return 0;
+
     case WM_CLOSE:
         if (!exiting_) {
-            SetWindowTextW(hwndStatusBar_, L"程序已缩小到托盘，右键托盘图标选择\"显示窗口\"。");
-            if (tray_) tray_->ShowBalloon(L"提示", L"程序已缩小到托盘", 2000);
+            bool zh = (currentLang_ == LangZh);
+            SetWindowTextW(hwndStatusBar_, zh ? L"程序已缩小到托盘，右键托盘图标选择\"显示窗口\"" : L"Minimized to tray. Right-click tray icon to show window.");
+            if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_NOTICE, zh), zh ? L"程序已缩小到托盘" : L"Minimized to tray", 2000);
             ShowWindow(hwnd_, SW_HIDE);
             return 0;
         }
@@ -781,6 +989,7 @@ LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DESTROY:
         KillTimer(hwnd_, 1);
+        FlushPendingMessages();
         PostQuitMessage(0);
         return 0;
 
@@ -814,4 +1023,17 @@ LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     return DefWindowProcW(hwnd_, msg, wp, lp);
+}
+
+// 清理残留的异步消息，防止内存泄漏
+void MainWindow::FlushPendingMessages() {
+    MSG msg;
+    while (PeekMessageW(&msg, hwnd_, WM_OUTPUT, WM_OUTPUT, PM_REMOVE)) {
+        auto* event = reinterpret_cast<OutputEvent*>(msg.lParam);
+        delete event;
+    }
+    while (PeekMessageW(&msg, hwnd_, WM_PROCESS_EXIT, WM_PROCESS_EXIT, PM_REMOVE)) {
+        auto* event = reinterpret_cast<ExitEvent*>(msg.lParam);
+        delete event;
+    }
 }

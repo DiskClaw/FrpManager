@@ -9,10 +9,12 @@ FrpProcess::~FrpProcess() {
     Stop();
 }
 
+// 设置进程回调（OnOutput、OnExit）
 void FrpProcess::SetCallback(IFrpProcessCallback* cb) {
     cb_ = cb;
 }
 
+// 启动 frpc/frps 进程，捕获 stdout/stderr 输出到回调
 bool FrpProcess::Start(const std::wstring& exePath,
     const std::wstring& configPath,
     const std::wstring& workingDir) {
@@ -24,7 +26,7 @@ bool FrpProcess::Start(const std::wstring& exePath,
     if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) return false;
     SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-    std::wstring cmdLine = L"\"" + exePath + L"\" -c \"" + configPath + L"\"";
+    std::wstring cmdLine = std::wstring(L"\"") + exePath + L"\" -c \"" + configPath + L"\"";
     std::vector<wchar_t> buffer(cmdLine.begin(), cmdLine.end());
     buffer.push_back(L'\0');
 
@@ -79,6 +81,7 @@ bool FrpProcess::Start(const std::wstring& exePath,
     return true;
 }
 
+// 停止进程：先关管道解除读线程阻塞，再终止进程，最后等待线程退出
 void FrpProcess::Stop() {
     HANDLE thread = nullptr, process = nullptr, pipe = nullptr;
     {
@@ -94,34 +97,41 @@ void FrpProcess::Stop() {
         pendingLine_.clear();
     }
 
+    // 先关管道：让 ReadFile 立刻返回，读线程不会卡住
+    if (pipe) CloseHandle(pipe);
+
     if (process) {
         if (WaitForSingleObject(process, 0) != WAIT_OBJECT_0) {
             TerminateProcess(process, 0);
         }
     }
 
+    // 管道已关，读线程应该很快退出，2 秒足够
     if (thread) {
-        WaitForSingleObject(thread, 5000);
+        WaitForSingleObject(thread, 2000);
         CloseHandle(thread);
     }
 
     if (process) CloseHandle(process);
-    if (pipe)    CloseHandle(pipe);
 }
 
+// 检查进程是否仍在运行（加锁避免 data race）
 bool FrpProcess::IsRunning() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!running_ || !pi_.hProcess) return false;
     DWORD code = 0;
     if (!GetExitCodeProcess(pi_.hProcess, &code)) return false;
     return (code == STILL_ACTIVE);
 }
 
+// 管道读取线程入口，转发到成员函数
 DWORD WINAPI FrpProcess::ReadPipeThread(LPVOID param) {
     auto* self = static_cast<FrpProcess*>(param);
     self->ReadOutput(self->readPipe_);
     return 0;
 }
 
+// 从管道读取输出，按行切割并回调 OnOutput
 void FrpProcess::ReadOutput(HANDLE pipe) {
     char buf[4096];
     DWORD bytesRead;
@@ -153,6 +163,7 @@ void FrpProcess::ReadOutput(HANDLE pipe) {
     Cleanup();
 }
 
+// 清理进程句柄和管道，回调 OnExit
 void FrpProcess::Cleanup() {
     HANDLE process = nullptr, pipe = nullptr;
     DWORD exitCode = 0;
@@ -177,6 +188,7 @@ void FrpProcess::Cleanup() {
     if (shouldNotify) NotifyExit(exitCode);
 }
 
+// 通知回调进程已退出（防重入）
 void FrpProcess::NotifyExit(DWORD exitCode) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (exitNotified_) return;

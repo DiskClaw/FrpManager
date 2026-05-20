@@ -39,6 +39,6 @@ private:
     IFrpProcessCallback* cb_ = nullptr;
     bool running_ = false;
     bool exitNotified_ = false;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::string pendingLine_;
 };

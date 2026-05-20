@@ -13,6 +13,30 @@ namespace {
 
     constexpr wchar_t SETTINGS_WINDOW_CLASS[] = L"FrpManagerSettingsWindow";
 
+    // 当前语言设置（由ShowDialog设置）
+    thread_local bool g_zh = true;
+
+    const wchar_t* S(int id, bool zh) {
+        static const wchar_t* t[][2] = {
+            /* 0 */  { L"选择 FRP 安装目录",         L"Select FRP Root" },
+            /* 1 */  { L"已更改 FRP 根目录: ",      L"FRP root changed: " },
+            /* 2 */  { L"打开配置文件: ",            L"Open config: " },
+            /* 3 */  { L"未找到可编辑的配置文件",    L"No editable config found" },
+            /* 4 */  { L"所选 FRP 目录不存在。",     L"Directory does not exist." },
+            /* 5 */  { L"将删除 FRP 根目录下的所有 .log 文件。\n确定要继续吗？",
+                       L"All .log files in FRP root will be deleted.\nContinue?" },
+            /* 6 */  { L"清除日志",                 L"Clear Logs" },
+            /* 7 */  { L"清除日志失败: FRP 根目录无效", L"Failed: invalid FRP root" },
+            /* 8 */  { L"FRP 设置",               L"FRP Settings" },
+            /* 9 */  { L"FRP 根目录",               L"FRP Root" },
+            /* 10 */ { L"选择路径",                L"Browse" },
+            /* 11 */ { L"编辑配置",               L"Edit Config" },
+            /* 12 */ { L"确定",                   L"OK" },
+            /* 13 */ { L"取消",                   L"Cancel" },
+        };
+        return t[id][zh ? 0 : 1];
+    }
+
     enum ControlId {
         IDC_ROOT_EDIT = 1001,
         IDC_BROWSE = 1002,
@@ -126,23 +150,20 @@ namespace {
         HWND logEdit = nullptr;
         std::wstring root;
         bool accepted = false;
+        bool zh = true;
         std::deque<std::wstring> logLines;
     };
 
-    // 追加日志，无行数限制，根据实际行数自动显示/隐藏垂直滚动条
+    // 追加日志，使用 EM_REPLACESEL 高效追加，限制最大行数
     void AppendLog(HWND logEdit, std::deque<std::wstring>& lines, const std::wstring& msg) {
         lines.push_back(msg);
-        std::wstring text;
-        for (const auto& line : lines) {
-            text += line + L"\r\n";
-        }
-        SetWindowTextW(logEdit, text.c_str());
-        LRESULT lineCount = SendMessageW(logEdit, EM_GETLINECOUNT, 0, 0);
-        ShowScrollBar(logEdit, SB_VERT, lineCount > 6);
-        InvalidateRect(logEdit, NULL, TRUE);
-        // 滚动到底部
+        if (lines.size() > 500) lines.pop_front();
         int len = GetWindowTextLengthW(logEdit);
         SendMessageW(logEdit, EM_SETSEL, len, len);
+        std::wstring wmsg = msg + L"\r\n";
+        SendMessageW(logEdit, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(wmsg.c_str()));
+        LRESULT lineCount = SendMessageW(logEdit, EM_GETLINECOUNT, 0, 0);
+        ShowScrollBar(logEdit, SB_VERT, lineCount > 6);
         SendMessageW(logEdit, EM_SCROLLCARET, 0, 0);
     }
 
@@ -166,7 +187,7 @@ namespace {
         if (!state) return;
         BROWSEINFOW bi = {};
         bi.hwndOwner = state->hwnd;
-        bi.lpszTitle = L"选择 FRP 安装目录";
+        bi.lpszTitle = S(0, state->zh);
         bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
         bi.lpfn = BrowseCallbackProc;
         std::wstring initDir = state->root;
@@ -181,7 +202,7 @@ namespace {
             SetWindowTextW(state->rootEdit, path);
             RefreshDetection(state);
             if (oldRoot != state->root) {
-                AppendLog(state->logEdit, state->logLines, L"已更改 FRP 根目录: " + state->root);
+                AppendLog(state->logEdit, state->logLines, std::wstring(S(1, state->zh)) + state->root);
             }
         }
         CoTaskMemFree(pidl);
@@ -190,6 +211,19 @@ namespace {
     LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         auto* state = reinterpret_cast<SettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
         switch (msg) {
+        case WM_REFRESH_LANG:
+            if (state) {
+                state->zh = (wp != 0);
+                SetWindowTextW(hwnd, S(8, state->zh));
+                SetWindowTextW(state->rootEdit, state->root.c_str());
+                SetWindowTextW(GetDlgItem(hwnd, IDC_BROWSE), S(10, state->zh));
+                SetWindowTextW(GetDlgItem(hwnd, IDC_INIT), S(6, state->zh));
+                SetWindowTextW(GetDlgItem(hwnd, IDC_EDIT_CONFIG), S(11, state->zh));
+                SetWindowTextW(GetDlgItem(hwnd, IDC_OK), S(12, state->zh));
+                SetWindowTextW(GetDlgItem(hwnd, IDC_CANCEL), S(13, state->zh));
+                SetWindowTextW(GetDlgItem(hwnd, IDC_HINT), S(9, state->zh));
+            }
+            return 0;
         case WM_NCCREATE: {
             auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
             state = reinterpret_cast<SettingsDialogState*>(cs->lpCreateParams);
@@ -208,12 +242,12 @@ namespace {
                 for (const auto& cfg : { state->settings->GetFrpcConfig(), state->settings->GetFrpsConfig() }) {
                     if (!cfg.empty()) {
                         ShellExecuteW(hwnd, L"open", cfg.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-                        AppendLog(state->logEdit, state->logLines, L"打开配置文件: " + cfg);
+                        AppendLog(state->logEdit, state->logLines, std::wstring(S(2, state->zh)) + cfg);
                         opened = true;
                     }
                 }
                 if (!opened)
-                    AppendLog(state->logEdit, state->logLines, L"未找到可编辑的配置文件");
+                    AppendLog(state->logEdit, state->logLines, S(3, state->zh));
                 return 0;
             }
             case IDC_OK: {
@@ -222,7 +256,7 @@ namespace {
                 GetWindowTextW(state->rootEdit, root.data(), len + 1);
                 root.resize(len);
                 if (!root.empty() && !DirExists(root)) {
-                    MessageBoxW(hwnd, L"所选 FRP 目录不存在。", L"设置", MB_ICONERROR);
+                    MessageBoxW(hwnd, S(4, state->zh), S(8, state->zh), MB_ICONERROR);
                     return 0;
                 }
                 state->settings->SetFrpRoot(root);
@@ -237,18 +271,17 @@ namespace {
                 if (HIWORD(wp) == EN_CHANGE) RefreshDetection(state);
                 return 0;
             case IDC_INIT: {
-                int ret = MessageBoxW(hwnd,
-                    L"将删除 FRP 根目录下的所有 .log 文件。\n确定要继续吗？",
-                    L"清除日志", MB_YESNO | MB_ICONWARNING);
+                int ret = MessageBoxW(hwnd, S(5, state->zh), S(6, state->zh), MB_YESNO | MB_ICONWARNING);
                 if (ret == IDYES) {
                     std::wstring rootDir = state->settings->GetFrpRoot();
                     int deleted = DeleteLogFilesInDir(rootDir);
                     if (deleted < 0) {
-                        AppendLog(state->logEdit, state->logLines, L"清除日志失败: FRP 根目录无效");
+                        AppendLog(state->logEdit, state->logLines, S(7, state->zh));
                     }
                     else {
                         AppendLog(state->logEdit, state->logLines,
-                            L"已删除 " + std::to_wstring(deleted) + L" 个日志文件");
+                            std::wstring(state->zh ? L"已删除 " : L"Deleted ") + std::to_wstring(deleted) +
+                            (state->zh ? L" 个日志文件" : L" log files"));
                     }
                 }
                 return 0;
@@ -314,10 +347,12 @@ void Settings::SetFrpRoot(const std::wstring& path) {
     WriteRegStr(HKEY_CURRENT_USER, REG_KEY, VAL_FRP_ROOT, path.c_str());
 }
 
+// 读取开机自启动注册表状态
 bool Settings::GetAutoStart() const {
     return ReadRegDword(HKEY_CURRENT_USER, REG_KEY, VAL_AUTO_START, 0) != 0;
 }
 
+// 设置开机自启动（写入 HKCU\Run 键）
 void Settings::SetAutoStart(bool enable) {
     HKEY hRun = nullptr;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hRun) != ERROR_SUCCESS) {
@@ -337,6 +372,7 @@ void Settings::SetAutoStart(bool enable) {
     WriteRegDword(HKEY_CURRENT_USER, REG_KEY, VAL_AUTO_START, enable ? 1 : 0);
 }
 
+// 检测 FRP 目录下的可执行文件和配置文件路径
 Settings::DetectionInfo Settings::Detect() const {
     DetectionInfo info;
     info.root = GetFrpRoot();
@@ -354,6 +390,7 @@ std::wstring Settings::GetFrpsExe() const { return Detect().frpsExe; }
 std::wstring Settings::GetFrpcConfig() const { return Detect().frpcConfig; }
 std::wstring Settings::GetFrpsConfig() const { return Detect().frpsConfig; }
 
+// 自动检测 FRP 根目录：优先程序同目录，其次上级目录
 std::wstring Settings::AutoDetectFrpRoot() {
     wchar_t exePath[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
@@ -373,13 +410,16 @@ std::wstring Settings::AutoDetectFrpRoot() {
     return {};
 }
 
-bool Settings::ShowDialog(HWND owner) {
+// 显示设置对话框模态窗口（浏览目录、清理日志、编辑配置）
+bool Settings::ShowDialog(HWND owner, bool zh) {
     EnsureSettingsClassRegistered();
 
+    g_zh = zh;
     SettingsDialogState state;
     state.settings = this;
     state.owner = owner;
     state.root = GetFrpRoot();
+    state.zh = zh;
 
     HFONT font = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_CHARSET, L"Segoe UI");
@@ -397,26 +437,28 @@ bool Settings::ShowDialog(HWND owner) {
     int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - winH) / 2;
 
     HWND hwnd = CreateWindowExW(
-        WS_EX_DLGMODALFRAME, SETTINGS_WINDOW_CLASS, L"FRP 设置",
+        WS_EX_DLGMODALFRAME, SETTINGS_WINDOW_CLASS, S(8, zh),
         WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE,
         x, y, winW, winH, owner, nullptr, GetModuleHandle(nullptr), &state);
     if (!hwnd) {
         DeleteObject(font);
+        this->hwndDialog_ = nullptr;
         return false;
     }
+    this->hwndDialog_ = hwnd;
 
     const int browseW = 90;
     const int editW = W - PAD * 2 - browseW - 8;
 
-    CreateLabel(hwnd, L"FRP 根目录", PAD, 18, 200, 20, font);
+    CreateLabel(hwnd, S(9, zh), PAD, 18, 200, 20, font);
     state.rootEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", state.root.c_str(),
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, PAD, 40, editW, 24, hwnd,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_ROOT_EDIT)), GetModuleHandle(nullptr), nullptr);
     SendMessageW(state.rootEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    CreateButton(hwnd, L"选择路径", W - PAD - browseW, 39, browseW, 26, IDC_BROWSE, font);
+    CreateButton(hwnd, S(10, zh), W - PAD - browseW, 39, browseW, 26, IDC_BROWSE, font);
 
-    CreateButton(hwnd, L"清除日志", PAD, 76, 90, 26, IDC_INIT, font);
-    CreateButton(hwnd, L"编辑配置", W - PAD - 90, 76, 90, 26, IDC_EDIT_CONFIG, font);
+    CreateButton(hwnd, S(6, zh), PAD, 76, 90, 26, IDC_INIT, font);
+    CreateButton(hwnd, S(11, zh), W - PAD - 90, 76, 90, 26, IDC_EDIT_CONFIG, font);
 
     const int logY = 108;
     const int logH = 160;
@@ -429,13 +471,14 @@ bool Settings::ShowDialog(HWND owner) {
 
     const int btnY = logY + logH + 10;
     const int btnW2 = 90;
-    CreateButton(hwnd, L"确定", W - PAD - btnW2 * 2 - 10, btnY, btnW2, 28, IDC_OK, font);
-    CreateButton(hwnd, L"取消", W - PAD - btnW2, btnY, btnW2, 28, IDC_CANCEL, font);
+    CreateButton(hwnd, S(12, zh), W - PAD - btnW2 * 2 - 10, btnY, btnW2, 28, IDC_OK, font);
+    CreateButton(hwnd, S(13, zh), W - PAD - btnW2, btnY, btnW2, 28, IDC_CANCEL, font);
 
     RefreshDetection(&state);
 
     if (owner) EnableWindow(owner, FALSE);
 
+    bool quitReceived = false;
     MSG msg = {};
     while (IsWindow(hwnd) && GetMessageW(&msg, nullptr, 0, 0)) {
         if (!IsDialogMessageW(hwnd, &msg)) {
@@ -443,15 +486,22 @@ bool Settings::ShowDialog(HWND owner) {
             DispatchMessageW(&msg);
         }
     }
+    // WM_QUIT 被模态循环吞掉了，重新投递给主循环
+    if (msg.message == WM_QUIT) {
+        quitReceived = true;
+        this->hwndDialog_ = nullptr;
+    }
 
     if (owner) {
         EnableWindow(owner, TRUE);
         SetForegroundWindow(owner);
     }
     DeleteObject(font);
+    if (quitReceived) PostQuitMessage(static_cast<int>(msg.wParam));
     return state.accepted;
 }
 
+// 删除 Windows 服务 frpc/frps（需管理员权限）
 void Settings::DeleteFrpServices() {
     if (!IsRunAsAdmin()) return;
     SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
@@ -469,8 +519,15 @@ void Settings::DeleteFrpServices() {
     CloseServiceHandle(scm);
 }
 
+// 程序初始化清理：停止所有 frp 进程、关闭开机自启、删除服务（需确认）
 void Settings::InitCleanup() {
     if (m_pMain) {
+        HWND mainHwnd = m_pMain->GetHwnd();
+        // 确认对话框：避免误杀生产环境 frp 进程
+        int ret = MessageBoxW(mainHwnd,
+            L"将停止所有 frpc/frps 进程、关闭开机自启并删除服务。\n确定继续？",
+            L"初始化清理", MB_YESNO | MB_ICONWARNING);
+        if (ret != IDYES) return;
         m_pMain->StopAllProcesses();
     }
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
