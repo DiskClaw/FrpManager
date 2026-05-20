@@ -1,3 +1,6 @@
+<img width="501" height="630" alt="ScreenShot_2026-05-20_163130_225" src="https://github.com/user-attachments/assets/9bbdb124-3b3b-4a74-b783-c924bc8a1ebd" />
+
+
 # FrpManager 🔐
 
 轻量级 Windows FRP 客户端/服务端进程管理器，原生 Win32 实现。
