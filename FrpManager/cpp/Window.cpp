@@ -714,8 +714,7 @@ bool MainWindow::ShowSettingsDialog() {
     bool zh = (currentLang_ == LangZh);
     bool ok = settings_.ShowDialog(hwnd_, zh);
     if (ok) {
-        UpdateProcessControls();
-        RefreshSummary();
+        SetFrpRoot(settings_.GetFrpRoot());
         SetWindowTextW(hwndStatusBar_, Ls(S_SETTINGS_UPDATED, zh));
     }
     return ok;
