@@ -3,30 +3,54 @@ name: Build FrpManager
 on:
   push:
     branches: [master]
-  pull_request:
-    branches: [master]
+    tags: ['v*']
 
 jobs:
   build:
     runs-on: windows-latest
-
     strategy:
       matrix:
         platform: [x64]
         configuration: [Release]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
-    - name: Build
-      run: msbuild FrpManager.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /v:minimal
+      - name: Build
+        run: msbuild FrpManager.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /v:minimal
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: FrpManager-${{ matrix.platform }}-${{ matrix.configuration }}
-        path: FrpManager.exe
-        if-no-files-found: warn
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrpManager-${{ matrix.platform }}-${{ matrix.configuration }}
+          path: FrpManager.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FrpManager ${{ github.ref_name }}
+          body: |
+            ## FRP Manager
+
+            轻量级 FRP 管理工具，支持 frpc/frps 的启动、停止、配置管理和后台服务运行。
+
+            ### 功能特性
+            - 一键启动/停止 frpc 和 frps
+            - 自动检测 exe 和配置文件
+            - 彩色日志实时输出
+            - 最小化到系统托盘，纯后台服务模式
+            - 开机自启（静默运行）
+            - 中英文界面
+            - 配置变更自动检测
+
+            ### 使用说明
+            1. 下载 `FrpManager.exe`
+            2. 放置到 FRP 目录下（与 `frpc.exe`/`frps.exe` 同级或指定根目录）
+            3. 运行即可自动检测并管理 FRP 进程
+            4. 右键托盘菜单可隐藏图标，再次运行恢复
+          files: FrpManager.exe
+          generate_release_notes: true
