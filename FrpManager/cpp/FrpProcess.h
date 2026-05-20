@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <windows.h>
 #include <mutex>
 #include <string>
@@ -27,10 +27,15 @@ public:
     void SetCallback(IFrpProcessCallback* cb);
 
 private:
+    struct ThreadParam {
+        FrpProcess* self;
+        unsigned int generation;
+    };
+
     static DWORD WINAPI ReadPipeThread(LPVOID param);
-    void ReadOutput(HANDLE pipe);
+    void ReadOutput(HANDLE pipe, unsigned int generation);
     void NotifyExit(DWORD exitCode);
-    void Cleanup();
+    void Cleanup(unsigned int generation);
 
     FrpMode mode_;
     PROCESS_INFORMATION pi_ = {};
@@ -39,6 +44,7 @@ private:
     IFrpProcessCallback* cb_ = nullptr;
     bool running_ = false;
     bool exitNotified_ = false;
+    unsigned int generation_ = 0;
     mutable std::mutex mutex_;
     std::string pendingLine_;
 };

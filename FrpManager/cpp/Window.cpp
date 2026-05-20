@@ -201,7 +201,8 @@ namespace {
         using DwmSetAttr = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
         auto pfn = (DwmSetAttr)GetProcAddress(hDwm, "DwmSetWindowAttribute");
         if (pfn) {
-            DWORD c = 2; pfn(hwnd, 33, &c, sizeof(c)); // 圆角（Win11）
+            DWORD c = 2; pfn(hwnd, 33, &c, sizeof(c));
+            BOOL dark = FALSE; pfn(hwnd, 20, &dark, sizeof(dark));
         }
         FreeLibrary(hDwm);
     }
@@ -321,7 +322,7 @@ bool MainWindow::RegisterClass() {
     if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm = wc.hIcon;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = (hBgBrush_ = CreateSolidBrush(RGB(240, 240, 240)));
+    wc.hbrBackground = (hBgBrush_ = CreateSolidBrush(RGB(255, 255, 255)));
     wc.lpszClassName = CLASS_NAME;
     return RegisterClassExW(&wc) != 0;
 }
@@ -965,6 +966,13 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
 // 消息处理分发中心，响应所有窗口消息
 LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_CTLCOLORSTATIC || msg == WM_CTLCOLOREDIT) {
+        HDC hdc = reinterpret_cast<HDC>(wp);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(30, 30, 30));
+        return reinterpret_cast<LRESULT>(hBgBrush_);
+    }
+
     if (msg == WM_TRAYICON) {
         if (tray_) tray_->HandleMsg(hwnd_, msg, wp, lp);
         return 0;
