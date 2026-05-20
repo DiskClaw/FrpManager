@@ -1,4 +1,4 @@
-﻿// Window.h - 主窗口
+// Window.h - 主窗口
 #pragma once
 #include <windows.h>
 #include "FrpProcess.h"
@@ -22,6 +22,7 @@ public:
     bool RegisterClass();
     HWND CreateWindow_();
     void SetFrpRoot(const std::wstring& path);
+    void SetHideMode(bool hide) { hideMode_ = hide; }
 
     // 停止所有进程并更新控件状态（供 Settings 调用）
     void StopAllProcesses();
@@ -96,6 +97,8 @@ private:
 
     // ---- 状态 ----
     bool exiting_ = false;
+    bool hideMode_ = false;
+    bool trayHidden_ = false;
 
     // 配置文件时间戳缓存，用于检测外部修改
     FILETIME frpcLastWrite_ = {};

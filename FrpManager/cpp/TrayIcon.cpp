@@ -1,4 +1,4 @@
-﻿#include "TrayIcon.h"
+#include "TrayIcon.h"
 #include <shellapi.h>
 
 TrayIcon::TrayIcon() = default;
@@ -42,9 +42,10 @@ void TrayIcon::SetTooltip(const wchar_t* tooltip) {
 }
 
 // 设置托盘右键菜单项文本（显示、语言切换、退出）
-void TrayIcon::SetMenuStrings(const wchar_t* show, const wchar_t* lang, const wchar_t* exit) {
+void TrayIcon::SetMenuStrings(const wchar_t* show, const wchar_t* lang, const wchar_t* hide, const wchar_t* exit) {
     if (show) showLabel_ = show;
     if (lang) langLabel_ = lang;
+    if (hide) hideLabel_ = hide;
     if (exit) exitLabel_ = exit;
 }
 
@@ -96,6 +97,7 @@ LRESULT TrayIcon::HandleMsg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HMENU hMenu = CreatePopupMenu();
         AppendMenuW(hMenu, MF_STRING, ID_SHOW, showLabel_.c_str());
         AppendMenuW(hMenu, MF_STRING, ID_LANG, langLabel_.c_str());
+        AppendMenuW(hMenu, MF_STRING, ID_HIDE_ICON, hideLabel_.c_str());
         AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(hMenu, MF_STRING, ID_EXIT, exitLabel_.c_str());
         POINT pt;
@@ -106,6 +108,7 @@ LRESULT TrayIcon::HandleMsg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DestroyMenu(hMenu);
         if (cmd == ID_SHOW && cb_) cb_->OnTrayShow();
         else if (cmd == ID_LANG) PostMessageW(parent_, WM_TOGGLE_LANG, 0, 0);
+        else if (cmd == ID_HIDE_ICON) PostMessageW(parent_, WM_HIDE_TRAY, 0, 0);
         else if (cmd == ID_EXIT && cb_) cb_->OnTrayExit();
         break;
     }

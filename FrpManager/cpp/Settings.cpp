@@ -362,8 +362,9 @@ void Settings::SetAutoStart(bool enable) {
     if (enable) {
         wchar_t exePath[MAX_PATH] = {};
         GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        RegSetValueExW(hRun, L"FrpManager", 0, REG_SZ, reinterpret_cast<const BYTE*>(exePath),
-            static_cast<DWORD>((wcslen(exePath) + 1) * sizeof(wchar_t)));
+        std::wstring cmd = std::wstring(L"\"") + exePath + L"\" --hide";
+        RegSetValueExW(hRun, L"FrpManager", 0, REG_SZ, reinterpret_cast<const BYTE*>(cmd.c_str()),
+            static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t)));
     }
     else {
         RegDeleteValueW(hRun, L"FrpManager");
@@ -421,12 +422,12 @@ bool Settings::ShowDialog(HWND owner, bool zh) {
     state.root = GetFrpRoot();
     state.zh = zh;
 
-    HFONT font = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_CHARSET, L"Segoe UI");
+    HFONT font = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_CHARSET, L"Microsoft YaHei UI");
 
-    const int W = 520;
-    const int PAD = 24;
-    RECT rc = { 0, 0, W, 330 };
+    const int W = 420;
+    const int PAD = 20;
+    RECT rc = { 0, 0, W, 300 };
     AdjustWindowRect(&rc, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE);
     const int winW = rc.right - rc.left;
     const int winH = rc.bottom - rc.top;
@@ -447,32 +448,36 @@ bool Settings::ShowDialog(HWND owner, bool zh) {
     }
     this->hwndDialog_ = hwnd;
 
-    const int browseW = 90;
-    const int editW = W - PAD * 2 - browseW - 8;
+    // 布局与主窗口同步：gx=20, rightEdge=W-20, 内容宽度=380
+    const int contentW = W - PAD * 2;  // 380
+    const int gx = PAD;                 // 20
+    const int rightEdge = W - PAD;      // 400
+    const int browseW = 80;
+    const int editW = rightEdge - gx - browseW - 8;
 
-    CreateLabel(hwnd, S(9, zh), PAD, 18, 200, 20, font);
+    CreateLabel(hwnd, S(9, zh), gx, 16, 200, 20, font);
     state.rootEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", state.root.c_str(),
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, PAD, 40, editW, 24, hwnd,
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, gx, 38, editW, 24, hwnd,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_ROOT_EDIT)), GetModuleHandle(nullptr), nullptr);
     SendMessageW(state.rootEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    CreateButton(hwnd, S(10, zh), W - PAD - browseW, 39, browseW, 26, IDC_BROWSE, font);
+    CreateButton(hwnd, S(10, zh), rightEdge - browseW, 37, browseW, 30, IDC_BROWSE, font);
 
-    CreateButton(hwnd, S(6, zh), PAD, 76, 90, 26, IDC_INIT, font);
-    CreateButton(hwnd, S(11, zh), W - PAD - 90, 76, 90, 26, IDC_EDIT_CONFIG, font);
+    CreateButton(hwnd, S(6, zh), gx, 72, 80, 30, IDC_INIT, font);
+    CreateButton(hwnd, S(11, zh), rightEdge - 80, 72, 80, 30, IDC_EDIT_CONFIG, font);
 
     const int logY = 108;
-    const int logH = 160;
+    const int logH = 130;
     state.logEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL,
-        PAD, logY, W - PAD * 2, logH, hwnd,
+        gx, logY, contentW, logH, hwnd,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LOG)), GetModuleHandle(nullptr), nullptr);
     SendMessageW(state.logEdit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    ShowScrollBar(state.logEdit, SB_VERT, FALSE);  // 初始隐藏
+    ShowScrollBar(state.logEdit, SB_VERT, FALSE);
 
     const int btnY = logY + logH + 10;
-    const int btnW2 = 90;
-    CreateButton(hwnd, S(12, zh), W - PAD - btnW2 * 2 - 10, btnY, btnW2, 28, IDC_OK, font);
-    CreateButton(hwnd, S(13, zh), W - PAD - btnW2, btnY, btnW2, 28, IDC_CANCEL, font);
+    const int btnW2 = 80;
+    CreateButton(hwnd, S(12, zh), rightEdge - btnW2 * 2 - 8, btnY, btnW2, 30, IDC_OK, font);
+    CreateButton(hwnd, S(13, zh), rightEdge - btnW2, btnY, btnW2, 30, IDC_CANCEL, font);
 
     RefreshDetection(&state);
 

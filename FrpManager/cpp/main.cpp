@@ -19,6 +19,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     MainWindow win;
+    win.SetHideMode(wcsstr(pCmdLine, L"--hide") != nullptr);
     if (!win.RegisterClass()) {
         MessageBoxW(nullptr, zh ? L"注册窗口类失败" : L"Register class failed", errTitle, MB_ICONERROR);
         CoUninitialize();
@@ -27,9 +28,9 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     HWND hwnd = win.CreateWindow_();
     if (!hwnd) {
-        MessageBoxW(nullptr, zh ? L"创建窗口失败" : L"Create window failed", errTitle, MB_ICONERROR);
+        // 单实例检测到已有实例时返回0（非错误），--hide模式下也返回0
         CoUninitialize();
-        return 1;
+        return 0;
     }
 
     MSG msg = {};

@@ -231,6 +231,7 @@ namespace {
         S_MSG_FRPC_STILL_RUNNING, S_MSG_FRPS_STILL_RUNNING,
         S_MSG_SET_ROOT_FIRST, S_AUTO_START_ENABLED, S_AUTO_START_DISABLED,
         S_SETTINGS_UPDATED,
+        S_HIDE_ICON, S_HIDE_ICON_TIP,
         S_COUNT
     };
 
@@ -287,6 +288,8 @@ namespace {
         /* S_AUTO_START_ENABLED */ { L"已开启开机自启",    L"Auto-start enabled" },
         /* S_AUTO_START_DISABLED */ { L"已关闭开机自启",   L"Auto-start disabled" },
         /* S_SETTINGS_UPDATED */ { L"设置已更新",         L"Settings updated" },
+        /* S_HIDE_ICON */       { L"隐藏图标",            L"Hide Icon" },
+        /* S_HIDE_ICON_TIP */   { L"图标已隐藏，再次运行程序可恢复", L"Icon hidden. Run again to restore" },
     };
 
     inline const wchar_t* Ls(StrId id, bool zh) { return STR[id][zh ? 0 : 1]; }
@@ -328,11 +331,13 @@ HWND MainWindow::CreateWindow_() {
     // 单实例检查：如果已有实例运行则激活它并退出
     hSingletonMutex_ = CreateMutexW(nullptr, TRUE, L"FrpManager_Singleton");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        // 查找已有窗口并前置
+        // 查找已有窗口并前置（--hide 模式下再次运行可唤醒显示）
         HWND existing = FindWindowW(CLASS_NAME, nullptr);
         if (existing) {
             ShowWindow(existing, SW_RESTORE);
             SetForegroundWindow(existing);
+            // 通知已有实例创建托盘图标（可能被隐藏了）
+            PostMessageW(existing, WM_SHOWWINDOW, TRUE, 0);
         }
         if (hSingletonMutex_) { CloseHandle(hSingletonMutex_); hSingletonMutex_ = nullptr; }
         return nullptr;
@@ -461,14 +466,28 @@ HWND MainWindow::CreateWindow_() {
 
     // 托盘与定时器
     tray_ = new TrayIcon();
-    tray_->Create(hwnd_, this, L"FRP 管理器");
-    SetTimer(hwnd_, 1, 2000, nullptr);  // 2 秒周期检查文件变化
+    if (!hideMode_) {
+        tray_->Create(hwnd_, this, Ls(S_TRAY_TOOLTIP, currentLang_ == LangZh));
+    }
+    else {
+        trayHidden_ = true;
+    }
+    SetTimer(hwnd_, 1, 2000, nullptr);
 
-    // 应用系统语言并刷新界面
     ApplyLang();
 
-    ShowWindow(hwnd_, SW_SHOW);
-    UpdateWindow(hwnd_);
+    if (!hideMode_) {
+        ShowWindow(hwnd_, SW_SHOW);
+        UpdateWindow(hwnd_);
+    }
+    else {
+        if (!cachedInfo_.frpcExe.empty() && !cachedInfo_.frpcConfig.empty()
+            && PathFileExistsW(cachedInfo_.frpcExe.c_str()) && PathFileExistsW(cachedInfo_.frpcConfig.c_str()))
+            StartProcess(FrpMode::Client);
+        if (!cachedInfo_.frpsExe.empty() && !cachedInfo_.frpsConfig.empty()
+            && PathFileExistsW(cachedInfo_.frpsExe.c_str()) && PathFileExistsW(cachedInfo_.frpsConfig.c_str()))
+            StartProcess(FrpMode::Server);
+    }
     UpdateProcessControls();
     RefreshSummary();
 
@@ -922,8 +941,9 @@ void MainWindow::ApplyLang() {
     tray_->SetTooltip(Ls(S_TRAY_TOOLTIP, zh));
     const wchar_t* showL = Ls(S_SHOW, zh);
     const wchar_t* langL = (currentLang_ == LangZh) ? Ls(S_SWITCH_TO_EN, zh) : Ls(S_SWITCH_TO_ZH, zh);
+    const wchar_t* hideL = Ls(S_HIDE_ICON, zh);
     const wchar_t* exitL = Ls(S_EXIT, zh);
-    tray_->SetMenuStrings(showL, langL, exitL);
+    tray_->SetMenuStrings(showL, langL, hideL, exitL);
 
     // 刷新状态文字
     UpdateProcessControls();
@@ -976,12 +996,33 @@ LRESULT MainWindow::HandleMsg(UINT msg, WPARAM wp, LPARAM lp) {
         ToggleLang();
         return 0;
 
+    case WM_HIDE_TRAY:
+        trayHidden_ = true;
+        if (tray_) tray_->Destroy();
+        return 0;
+
+    case WM_SHOWWINDOW:
+        if (wp && (hideMode_ || trayHidden_)) {
+            hideMode_ = false;
+            trayHidden_ = false;
+            if (tray_ && !tray_->IsCreated())
+                tray_->Create(hwnd_, this, Ls(S_TRAY_TOOLTIP, currentLang_ == LangZh));
+            ShowWindow(hwnd_, SW_SHOW);
+            SetForegroundWindow(hwnd_);
+        }
+        return 0;
+
     case WM_CLOSE:
         if (!exiting_) {
             bool zh = (currentLang_ == LangZh);
-            SetWindowTextW(hwndStatusBar_, zh ? L"程序已缩小到托盘，右键托盘图标选择\"显示窗口\"" : L"Minimized to tray. Right-click tray icon to show window.");
-            if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_NOTICE, zh), zh ? L"程序已缩小到托盘" : L"Minimized to tray", 2000);
-            ShowWindow(hwnd_, SW_HIDE);
+            if (trayHidden_) {
+                ShowWindow(hwnd_, SW_HIDE);
+            }
+            else {
+                SetWindowTextW(hwndStatusBar_, zh ? L"程序已缩小到托盘，右键托盘图标选择\"显示窗口\"" : L"Minimized to tray. Right-click tray icon to show window.");
+                if (tray_) tray_->ShowBalloon(Ls(S_BALLOON_NOTICE, zh), zh ? L"程序已缩小到托盘" : L"Minimized to tray", 2000);
+                ShowWindow(hwnd_, SW_HIDE);
+            }
             return 0;
         }
         DestroyWindow(hwnd_);
