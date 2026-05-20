@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
+
     strategy:
       matrix:
         platform: [x64]
@@ -21,12 +21,8 @@ jobs:
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
 
-    - name: Restore NuGet packages
-      run: nuget restore FrpManager.sln
-      continue-on-error: true
-
     - name: Build
-      run: msbuild FrpManager.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /v:minimal
+      run: msbuild FrpManager.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v144 /v:minimal
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
