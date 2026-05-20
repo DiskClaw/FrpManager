@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         platform: [x64]
@@ -53,4 +55,3 @@ jobs:
             3. 运行即可自动检测并管理 FRP 进程
             4. 右键托盘菜单可隐藏图标，再次运行恢复
           files: FrpManager.exe
-          generate_release_notes: true
