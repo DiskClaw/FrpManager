@@ -208,8 +208,25 @@ namespace {
         CoTaskMemFree(pidl);
     }
 
+    HBRUSH GetWhiteBrush() {
+        static HBRUSH brush = CreateSolidBrush(RGB(255, 255, 255));
+        return brush;
+    }
+
     LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         auto* state = reinterpret_cast<SettingsDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        if (msg == WM_CTLCOLORSTATIC || msg == WM_CTLCOLOREDIT || msg == WM_CTLCOLORBTN) {
+            HDC hdc = reinterpret_cast<HDC>(wp);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(30, 30, 30));
+            if (msg == WM_CTLCOLOREDIT) {
+                SetBkColor(hdc, RGB(255, 255, 255));
+                return reinterpret_cast<LRESULT>(GetWhiteBrush());
+            }
+            return reinterpret_cast<LRESULT>(GetWhiteBrush());
+        }
+
         switch (msg) {
         case WM_REFRESH_LANG:
             if (state) {
@@ -304,7 +321,7 @@ namespace {
         wc.lpfnWndProc = SettingsWndProc;
         wc.hInstance = GetModuleHandle(nullptr);
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+        wc.hbrBackground = GetWhiteBrush();
         wc.lpszClassName = SETTINGS_WINDOW_CLASS;
         wc.hIcon = LoadIconW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(1));
         if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
